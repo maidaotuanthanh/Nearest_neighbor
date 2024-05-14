@@ -167,7 +167,7 @@ async def get_route_picking():
     # list_wid, list_dst, list_route, list_ord = [], [], [], []
     for orders_numbers in range(1, 7):
         list_wid, list_dst, list_route, list_ord, distance_route = simulation_wave(y_low, y_high, orders_numbers, df_orderlines, list_wid, list_dst, list_route, list_ord)
-        print("Total distance covered for {} orders/wave: {:,} m".format(orders_numbers, distance_route))
+        # print("Total distance covered for {} orders/wave: {:,} m".format(orders_numbers, distance_route))
     # df_results = pd.DataFrame(
         # {'Wave_Number': list_wid, 'Distance_Route': list_dst, 'Chemins': list_route})
     # print(df_results)
@@ -176,3 +176,4 @@ async def get_route_picking():
     # return df_orderlines
     # return result
     return 1
+
