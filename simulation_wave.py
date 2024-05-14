@@ -84,24 +84,6 @@ def distance_picking(Loc1, Loc2, y_low, y_high):
     return distance, route
 
 
-class Graph:
-    def __init__(self):
-        self.nodes = set()
-        self.edges = {}
-
-    def add_node(self, value):
-        self.nodes.add(value)
-
-    def add_edge(self, from_node, to_node, distance):
-        self.edges[(from_node, to_node)] = distance
-
-    def neighbors(self, node):
-        return [n for n in self.nodes if (node, n) in self.edges]
-
-    def cost(self, from_node, to_node):
-        return self.edges[(from_node, to_node)]
-
-
 def next_location(start_loc, list_locs, y_low, y_high):
     list_dist = []
     list_route = []
@@ -117,6 +99,7 @@ def next_location(start_loc, list_locs, y_low, y_high):
     route = list_route[index_min]
     list_locs.remove(next_loc)
     return list_locs, next_loc, next_loc, distance_next, route
+
 
 def create_picking_route(origin_loc, list_locs, y_low, y_high):
     wave_distance = 0
