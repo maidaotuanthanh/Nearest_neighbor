@@ -14,7 +14,7 @@ def orderlines_mapping(df_orderlines, orders_number):
     # Tạo cột OrderID trong DataFrame theo dictionary đã tạo
     df_orderlines['OrderID'] = df_orderlines['OrderNumber'].map(dict_map)
     # Tạo cột WaveID theo công thức đã nêu ở trên
-    df_orderlines['WaveID'] = ((df_orderlines['OrderID'] + (orders_number - 1)) // orders_number)
+    df_orderlines['WaveID'] = ((df_orderlines['Order'] + (orders_number - 1)) // orders_number)
     waves_number = df_orderlines.WaveID.max() + 1
     # In kết quả
     # print(df_order_sorted)
@@ -122,44 +122,56 @@ def create_picking_route(origin_loc, list_locs, y_low, y_high):
 
 def get_product_layout(df_orderlines, df_layout, orders_number):
     df_orderlines, waves_number = orderlines_mapping(df_orderlines, orders_number)
+    df_orderlines = df_orderlines.sort_values(by='OrderNumber')
     df_grouped = df_orderlines.groupby(['WaveID', 'ProductID'])['QuantityOrder'].sum().reset_index()
-    df_grouped = df_grouped[df_grouped['WaveID'] == 1]
+
     df_layout['SubProductID'] = df_layout.groupby('ProductID').cumcount() + 1
     df_layout['SubProductID'] = df_layout['ProductID'] + '_' + df_layout['SubProductID'].astype(str)
-    product_ids_in_grouped = df_grouped['ProductID']
-    df_compare = df_layout[df_layout['ProductID'].isin(product_ids_in_grouped)]
-    df_compare = df_compare.sort_values(['ProductID', 'SubProductID'])
-    df_compare['QuantityTaken'] = 0
 
-    # Tạo danh sách để lưu trữ các 'SubProductID' cho mỗi lần chọn
-    pick_cases = []
+    df_final = pd.DataFrame()  # Tạo DataFrame rỗng
 
-    for index, row in df_compare.iterrows():
-        product_id = row['ProductID']
-        quantity_needed = df_grouped.loc[df_grouped['ProductID'] == product_id, 'QuantityOrder'].values[0]
+    for wave_id in range(1, waves_number + 1):
+        df_grouped_wave = df_grouped[df_grouped['WaveID'] == wave_id]
+        product_ids_in_grouped = df_grouped_wave['ProductID']
+        df_compare = df_layout[df_layout['ProductID'].isin(product_ids_in_grouped)]
+        df_compare = df_compare.sort_values(['ProductID', 'SubProductID'])
+        df_compare['QuantityTaken'] = 0
 
-        if quantity_needed > row['Quantity']:
-            df_grouped.loc[df_grouped['ProductID'] == product_id, 'QuantityOrder'] -= row['Quantity']
-            df_compare.loc[index, 'QuantityTaken'] = row['Quantity']
-            df_compare.loc[index, 'Quantity'] = 0
-        else:
-            df_compare.loc[index, 'QuantityTaken'] = quantity_needed
-            df_compare.loc[index, 'Quantity'] -= quantity_needed
+        for index, row in df_compare.iterrows():
+            product_id = row['ProductID']
+            quantity_needed = df_grouped_wave.loc[df_grouped_wave['ProductID'] == product_id, 'QuantityOrder'].values[0]
 
-        # Thêm 'SubProductID' vào danh sách
-        pick_cases.append(row['SubProductID'])
+            if quantity_needed > row['Quantity']:
+                df_grouped_wave.loc[df_grouped_wave['ProductID'] == product_id, 'QuantityOrder'] -= row['Quantity']
+                df_compare.loc[index, 'QuantityTaken'] = row['Quantity']
+                df_compare.loc[index, 'Quantity'] = 0
+            else:
+                df_grouped_wave.loc[df_grouped_wave['ProductID'] == row['ProductID'], 'QuantityOrder'] = 0
+                df_compare.loc[index, 'QuantityTaken'] = quantity_needed
+                df_compare.loc[index, 'Quantity'] -= quantity_needed
 
-    # df_compare = df_compare[df_compare['QuantityTaken'] != 0]
-    df_compare = df_compare.sort_values('STT')
-    df_compare.to_csv('df_compare_final.csv', index=False)
-    return df_compare, pick_cases
+        df_compare = df_compare[df_compare['QuantityTaken'] != 0]
+        df_compare = df_compare.sort_values('STT')
+        df_compare['WaveID'] = wave_id  # Thêm cột 'WaveID'
+        df_final = pd.concat([df_final, df_compare])  # Nối df_compare với df_final
+
+        # Cập nhật số lượng trong df_layout sau mỗi wave
+        for index, row in df_compare.iterrows():
+            df_layout.loc[(df_layout['ProductID'] == row['ProductID']) & (
+                        df_layout['SubProductID'] == row['SubProductID']), 'Quantity'] = row['Quantity']
+
+    df_final.to_csv('df_compare_final.csv', index=False)  # Lưu df_final vào file csv
+
+    return df_final
+
+
 df_orderlines = pd.read_csv('df_order.csv')
 orders_number = 3
 df_layout = pd.read_csv('df_layout.csv')
-df_compare, pick_cases = get_product_layout(df_orderlines, df_layout, orders_number)
+df_compare = get_product_layout(df_orderlines, df_layout, orders_number)
 
 # In ra danh sách 'SubProductID'
-print(pick_cases)
+# print(pick_cases)
 # df_orderlines, waves_number = orderlines_mapping(df_orderlines, orders_number)
 
 # Nhóm các 'ProductID' giống nhau và cộng các 'Quantity' của các 'Order' có cùng 'ProductID'
