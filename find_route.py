@@ -18,15 +18,59 @@ def orderlines_mapping(df_orderlines, orders_number):
     waves_number = df_orderlines.WaveID.max() + 1
     # In kết quả
     # print(df_order_sorted)
-    df_orderlines.to_csv('orders_wave.csv')
+    # df_orderlines.to_csv('orders_wave.csv')
     return df_orderlines, waves_number
 
 
-# List ra những location của một mã wave
-def locations_listing(df_orderlines, wave_id):
-    # Lọc ra từ Dataframe theo với mã wave muốn list
-    df = df_orderlines[df_orderlines.WaveID == wave_id]
+def get_product_layout(df_orderlines, df_layout, orders_number):
+    df_orderlines, waves_number = orderlines_mapping(df_orderlines, orders_number)
+    df_orderlines = df_orderlines.sort_values(by='OrderNumber')
+    df_grouped = df_orderlines.groupby(['WaveID', 'ProductID'])['QuantityOrder'].sum().reset_index()
 
+    df_layout['SubProductID'] = df_layout.groupby('ProductID').cumcount() + 1
+    df_layout['SubProductID'] = df_layout['ProductID'] + '_' + df_layout['SubProductID'].astype(str)
+
+    df_final = pd.DataFrame()  # Tạo DataFrame rỗng
+
+    for wave_id in range(1, waves_number + 1):
+        df_grouped_wave = df_grouped[df_grouped['WaveID'] == wave_id]
+        product_ids_in_grouped = df_grouped_wave['ProductID']
+        df_compare = df_layout[df_layout['ProductID'].isin(product_ids_in_grouped)]
+        df_compare = df_compare.sort_values(['ProductID', 'SubProductID'])
+        df_compare['QuantityTaken'] = 0
+
+        for index, row in df_compare.iterrows():
+            product_id = row['ProductID']
+            quantity_needed = df_grouped_wave.loc[df_grouped_wave['ProductID'] == product_id, 'QuantityOrder'].values[0]
+
+            if quantity_needed > row['Quantity']:
+                df_grouped_wave.loc[df_grouped_wave['ProductID'] == product_id, 'QuantityOrder'] -= row['Quantity']
+                df_compare.loc[index, 'QuantityTaken'] = row['Quantity']
+                df_compare.loc[index, 'Quantity'] = 0
+            else:
+                df_grouped_wave.loc[df_grouped_wave['ProductID'] == row['ProductID'], 'QuantityOrder'] = 0
+                df_compare.loc[index, 'QuantityTaken'] = quantity_needed
+                df_compare.loc[index, 'Quantity'] -= quantity_needed
+
+        df_compare = df_compare[df_compare['QuantityTaken'] != 0]
+        df_compare = df_compare.sort_values('STT')
+        df_compare['WaveID'] = wave_id  # Thêm cột 'WaveID'
+        df_final = pd.concat([df_final, df_compare])  # Nối df_compare với df_final
+
+        # Cập nhật số lượng trong df_layout sau mỗi wave
+        for index, row in df_compare.iterrows():
+            df_layout.loc[(df_layout['ProductID'] == row['ProductID']) & (
+                    df_layout['SubProductID'] == row['SubProductID']), 'Quantity'] = row['Quantity']
+
+    df_final.to_csv('df_compare_final.csv', index=False)  # Lưu df_final vào file csv
+
+    return df_final, waves_number
+
+
+# List ra những location của một mã wave
+def locations_listing(df_final, wave_id):
+    # Lọc ra từ Dataframe theo với mã wave muốn list
+    df = df_final[df_final['WaveID'] == wave_id]
     # Tạo list tọa độ bằng xử lý chuỗi
     list_locs = list(df['Coord'].apply(lambda t: literal_eval(t)).values)
     # list_locs = df['Coord'].tolist()
@@ -120,117 +164,51 @@ def create_picking_route(origin_loc, list_locs, y_low, y_high):
     return wave_distance, list_chemin
 
 
-def get_product_layout(df_orderlines, df_layout, orders_number):
-    df_orderlines, waves_number = orderlines_mapping(df_orderlines, orders_number)
-    df_orderlines = df_orderlines.sort_values(by='OrderNumber')
-    df_grouped = df_orderlines.groupby(['WaveID', 'ProductID'])['QuantityOrder'].sum().reset_index()
+def simulation_wave(y_low, y_high, orders_number, df_orderlines, list_wid, list_dst, list_route, list_ord, list_onum,
+                    list_status):
+    # Địa điểm ban đầu ( khu vực xuất hàng, cửa hàng)
+    Loc_orn = [0, y_low]
+    # Tạo biến để lưu tổng khoảng cách
+    distance_route = 0
 
-    df_layout['SubProductID'] = df_layout.groupby('ProductID').cumcount() + 1
-    df_layout['SubProductID'] = df_layout['ProductID'] + '_' + df_layout['SubProductID'].astype(str)
-
-    df_final = pd.DataFrame()  # Tạo DataFrame rỗng
-
-    for wave_id in range(1, waves_number + 1):
-        df_grouped_wave = df_grouped[df_grouped['WaveID'] == wave_id]
-        product_ids_in_grouped = df_grouped_wave['ProductID']
-        df_compare = df_layout[df_layout['ProductID'].isin(product_ids_in_grouped)]
-        df_compare = df_compare.sort_values(['ProductID', 'SubProductID'])
-        df_compare['QuantityTaken'] = 0
-
-        for index, row in df_compare.iterrows():
-            product_id = row['ProductID']
-            quantity_needed = df_grouped_wave.loc[df_grouped_wave['ProductID'] == product_id, 'QuantityOrder'].values[0]
-
-            if quantity_needed > row['Quantity']:
-                df_grouped_wave.loc[df_grouped_wave['ProductID'] == product_id, 'QuantityOrder'] -= row['Quantity']
-                df_compare.loc[index, 'QuantityTaken'] = row['Quantity']
-                df_compare.loc[index, 'Quantity'] = 0
-            else:
-                df_grouped_wave.loc[df_grouped_wave['ProductID'] == row['ProductID'], 'QuantityOrder'] = 0
-                df_compare.loc[index, 'QuantityTaken'] = quantity_needed
-                df_compare.loc[index, 'Quantity'] -= quantity_needed
-
-        df_compare = df_compare[df_compare['QuantityTaken'] != 0]
-        df_compare = df_compare.sort_values('STT')
-        df_compare['WaveID'] = wave_id  # Thêm cột 'WaveID'
-        df_final = pd.concat([df_final, df_compare])  # Nối df_compare với df_final
-
-        # Cập nhật số lượng trong df_layout sau mỗi wave
-        for index, row in df_compare.iterrows():
-            df_layout.loc[(df_layout['ProductID'] == row['ProductID']) & (
-                        df_layout['SubProductID'] == row['SubProductID']), 'Quantity'] = row['Quantity']
-
-    df_final.to_csv('df_compare_final.csv', index=False)  # Lưu df_final vào file csv
-
-    return df_final
+    # Lấy wave từ get_product_layout
+    df_final, waves_number = get_product_layout(df_orderlines, df_layout, orders_number)
+    for wave_id in range(1, waves_number):
+        # List ra các location cho mỗi wave
+        list_locs, n_locs = locations_listing(df_final, wave_id)
+        # Sử dụng hàm create_picking_route để tạo
+        wave_distance, list_chemin = create_picking_route(Loc_orn, list_locs, y_low, y_high)
+        distance_route = distance_route + wave_distance
+        list_wid.append(wave_id)
+        list_dst.append(wave_distance)
+        list_route.append(list_chemin)
+        # list_ord.append(orders_number)
+        # print(wave_id)
+    return list_wid, list_dst, list_route, list_ord, list_onum, list_status, distance_route
 
 
 df_orderlines = pd.read_csv('df_order.csv')
-orders_number = 3
+orders_numbers = 3
 df_layout = pd.read_csv('df_layout.csv')
-df_compare = get_product_layout(df_orderlines, df_layout, orders_number)
+y_low, y_high = 0, 25
 
-# In ra danh sách 'SubProductID'
-# print(pick_cases)
-# df_orderlines, waves_number = orderlines_mapping(df_orderlines, orders_number)
-
-# Nhóm các 'ProductID' giống nhau và cộng các 'Quantity' của các 'Order' có cùng 'ProductID'
-# df_grouped = df_orderlines.groupby(['WaveID', 'ProductID'])['QuantityOrder'].sum().reset_index()
-
-# In kết quả
-# print(df_grouped)
-# print(df_orderlines)
-# Đọc dữ liệu từ file df_layout.csv
-
-# Trích xuất cột 'ProductID' từ df_grouped
-# product_ids_in_grouped = df_grouped['ProductID']
-#
-# # Lọc df_layout dựa trên product_ids_in_grouped
-# df_layout_with_products_in_grouped = df_layout[df_layout['ProductID'].isin(product_ids_in_grouped)]
-#
-# # In kết quả
-# print(df_layout_with_products_in_grouped)
-# Tạo cột 'SubProductID' dựa trên số thứ tự của mỗi 'ProductID' trong nhóm của nó
-# df_layout['SubProductID'] = df_layout.groupby('ProductID').cumcount() + 1
-
-# Tạo cột 'SubProductID' mới bằng cách nối cột 'ProductID' với cột 'SubProductID'
-# df_layout['SubProductID'] = df_layout['ProductID'] + '_' + df_layout['SubProductID'].astype(str)
-
-# In kết quả
-# print to csv
-# df_layout.to_csv('df_compare.csv', index=False)
-# print(df_layout)
-# df_compare = pd.read_csv('df_compare.csv')
-# df_compare = df_layout
-# product_ids_in_grouped = df_grouped['ProductID']
-# df_compare = df_compare[df_compare['ProductID'].isin(product_ids_in_grouped)]
-# df_compare = df_compare.sort_values(['ProductID', 'SubProductID'])
-# Duyệt qua từng hàng của df_compare
-# Thêm cột mới 'QuantityTaken' vào df_compare để theo dõi số lượng sản phẩm đã lấy từ mỗi pallet
-# df_compare['QuantityTaken'] = 0
-
-# Sắp xếp df_compare theo cột 'Quantity' theo thứ tự tăng dần
-# df_compare = df_compare.sort_values('Quantity')
-
-# Duyệt qua từng hàng của df_compare
-# for index, row in df_compare.iterrows():
-#     # Lấy số lượng sản phẩm cần lấy từ df_grouped
-#     quantity_needed = df_grouped.loc[df_grouped['ProductID'] == row['ProductID'], 'QuantityOrder'].values[0]
-#
-#     # Kiểm tra xem số lượng sản phẩm cần lấy có lớn hơn số lượng sản phẩm trong pallet không
-#     if quantity_needed > row['Quantity']:
-#         # Nếu có, lấy tất cả sản phẩm trong pallet và giảm số lượng sản phẩm cần lấy
-#         df_grouped.loc[df_grouped['ProductID'] == row['ProductID'], 'QuantityOrder'] -= row['Quantity']
-#         df_compare.loc[index, 'QuantityTaken'] = row['Quantity']
-#         df_compare.loc[index, 'Quantity'] = 0
-#     else:
-#         # Nếu không, chỉ lấy số lượng sản phẩm cần lấy
-#         df_grouped.loc[df_grouped['ProductID'] == row['ProductID'], 'QuantityOrder'] = 0
-#         df_compare.loc[index, 'QuantityTaken'] = quantity_needed
-#         df_compare.loc[index, 'Quantity'] -= quantity_needed
-
-# Lọc df_compare để chỉ giữ lại các dòng có 'QuantityTaken' khác 0
-# df_sorted = df_compare.sort_values('STT')
-
-# Lưu df_compare vào file csv
-# df_sorted.to_csv('df_compare_updated.csv', index=False)
+list_wid, list_dst, list_route, list_ord, list_onum, list_status = [], [], [], [], [], []
+list_wid, list_dst, list_route, list_ord, list_onum, list_status, distance_route = simulation_wave(y_low, y_high,
+                                                                                                   orders_numbers,
+                                                                                                   df_orderlines,
+                                                                                                   list_wid,
+                                                                                                   list_dst,
+                                                                                                   list_route,
+                                                                                                   list_ord,
+                                                                                                   list_onum,
+                                                                                                   list_status)
+# print(list_route)
+# print(list_ord)
+# print(list_onum)
+# print(list_status)
+# print(distance_route)
+# print(list_wid)
+# print(list_dst)
+df_results = pd.DataFrame({'Distance_Route': list_dst, 'Chemins': list_route})
+# df_last_orders_number = df_results[df_results['Orders_Number'] == orders_numbersf]
+df_results.to_csv('output_2.csv', index=False)
