@@ -10,7 +10,7 @@ def orderlines_mapping(df_orderlines, orders_number):
     df_order_sorted = df_orderlines.sort_values(by='STT')
     list_orders = df_orderlines['OrderNumber'].unique()
     # Tạo cột 'Wave' dựa trên 'Order', mỗi wave bao gồm 3 đơn hàng
-    dict_map = dict(zip(list_orders, [i for i in range(1, len(list_orders) + 1)]))
+    dict_map = dict(zip(list_orders, list_orders))
     # Tạo cột OrderID trong DataFrame theo dictionary đã tạo
     df_orderlines['OrderID'] = df_orderlines['OrderNumber'].map(dict_map)
     # Tạo cột WaveID theo công thức đã nêu ở trên
@@ -26,19 +26,24 @@ def get_product_layout(df_orderlines, df_layout, orders_number):
     df_orderlines, waves_number = orderlines_mapping(df_orderlines, orders_number)
     df_orderlines = df_orderlines.sort_values(by='OrderNumber')
     df_grouped = df_orderlines.groupby(['WaveID', 'ProductID'])['QuantityOrder'].sum().reset_index()
-
+    # print(df_orderlines)
     df_layout['SubProductID'] = df_layout.groupby('ProductID').cumcount() + 1
     df_layout['SubProductID'] = df_layout['ProductID'] + '_' + df_layout['SubProductID'].astype(str)
 
     df_final = pd.DataFrame()  # Tạo DataFrame rỗng
+    wave_order_ids = df_orderlines.groupby('WaveID')['OrderID'].apply(list)  # Tạo mảng chứa các OrderID của từng wave
+    wave_order_ids_dict = wave_order_ids.to_dict()  # Chuyển đổi Series thành dictionary
 
-    for wave_id in range(1, waves_number + 1):
+    for wave_id in range(1, waves_number):
         df_grouped_wave = df_grouped[df_grouped['WaveID'] == wave_id]
         product_ids_in_grouped = df_grouped_wave['ProductID']
         df_compare = df_layout[df_layout['ProductID'].isin(product_ids_in_grouped)]
         df_compare = df_compare.sort_values(['ProductID', 'SubProductID'])
         df_compare['QuantityTaken'] = 0
+        # order_ids_wave = list(set(df_orderlines.loc[df_orderlines['WaveID'] == wave_id, 'OrderID'].tolist()))
+        # print(wave_id, ':', order_ids_wave)
 
+        # print(df_compare)
         for index, row in df_compare.iterrows():
             product_id = row['ProductID']
             quantity_needed = df_grouped_wave.loc[df_grouped_wave['ProductID'] == product_id, 'QuantityOrder'].values[0]
@@ -52,6 +57,8 @@ def get_product_layout(df_orderlines, df_layout, orders_number):
                 df_compare.loc[index, 'QuantityTaken'] = quantity_needed
                 df_compare.loc[index, 'Quantity'] -= quantity_needed
 
+            # Thêm OrderID vào df_compare
+            # df_compare.at[index, 'OrderID'] = order_id
         df_compare = df_compare[df_compare['QuantityTaken'] != 0]
         df_compare = df_compare.sort_values('STT')
         df_compare['WaveID'] = wave_id  # Thêm cột 'WaveID'
@@ -62,9 +69,9 @@ def get_product_layout(df_orderlines, df_layout, orders_number):
             df_layout.loc[(df_layout['ProductID'] == row['ProductID']) & (
                     df_layout['SubProductID'] == row['SubProductID']), 'Quantity'] = row['Quantity']
 
-    df_final.to_csv('df_compare_final.csv', index=False)  # Lưu df_final vào file csv
+    # df_final.to_csv('df_compare_final.csv', index=False)  # Lưu df_final vào file csv
 
-    return df_final, waves_number
+    return df_final, waves_number, wave_order_ids_dict
 
 
 # List ra những location của một mã wave
@@ -164,51 +171,51 @@ def create_picking_route(origin_loc, list_locs, y_low, y_high):
     return wave_distance, list_chemin
 
 
-def simulation_wave(y_low, y_high, orders_number, df_orderlines, list_wid, list_dst, list_route, list_ord, list_onum,
-                    list_status):
+def simulation_wave(y_low, y_high, orders_number, df_orderlines, wave_route, list_dst, list_route):
     # Địa điểm ban đầu ( khu vực xuất hàng, cửa hàng)
     Loc_orn = [0, y_low]
     # Tạo biến để lưu tổng khoảng cách
     distance_route = 0
-
+    # print(df_orderlines)
     # Lấy wave từ get_product_layout
-    df_final, waves_number = get_product_layout(df_orderlines, df_layout, orders_number)
+    df_final, waves_number, wave_order_ids_dict = get_product_layout(df_orderlines, df_layout, orders_number)
+    # print(wave_order_ids_dict)
+    # print(df_final)
+    order_ids_route = []  # Tạo danh sách mới để lưu OrderID
+
     for wave_id in range(1, waves_number):
         # List ra các location cho mỗi wave
         list_locs, n_locs = locations_listing(df_final, wave_id)
         # Sử dụng hàm create_picking_route để tạo
         wave_distance, list_chemin = create_picking_route(Loc_orn, list_locs, y_low, y_high)
         distance_route = distance_route + wave_distance
-        list_wid.append(wave_id)
         list_dst.append(wave_distance)
         list_route.append(list_chemin)
-        # list_ord.append(orders_number)
+        wave_route.append(wave_id)
         # print(wave_id)
-    return list_wid, list_dst, list_route, list_ord, list_onum, list_status, distance_route
+
+        # Loại bỏ các OrderID trùng lặp
+        unique_order_ids = list(set(wave_order_ids_dict[wave_id]))
+        unique_order_ids.sort()
+        wave_order_ids_dict[wave_id] = unique_order_ids
+        print(f"For wave_id {wave_id}, the unique OrderIDs are: {unique_order_ids}")
+        order_ids_route.append(unique_order_ids)
+
+    return wave_route, list_dst, list_route, distance_route, order_ids_route
 
 
-df_orderlines = pd.read_csv('df_order.csv')
+df_orderlines = pd.read_csv('database/df_order.csv')
 orders_numbers = 3
-df_layout = pd.read_csv('df_layout.csv')
+df_layout = pd.read_csv('database/df_layout.csv')
 y_low, y_high = 0, 25
+wave_route, list_dst, list_route = [], [], []
+wave_route, list_dst, list_route, distance_route, order_ids_route = simulation_wave(y_low, y_high,
+                                                                   orders_numbers,
+                                                                   df_orderlines,
+                                                                   wave_route,
+                                                                   list_dst,
+                                                                   list_route)
 
-list_wid, list_dst, list_route, list_ord, list_onum, list_status = [], [], [], [], [], []
-list_wid, list_dst, list_route, list_ord, list_onum, list_status, distance_route = simulation_wave(y_low, y_high,
-                                                                                                   orders_numbers,
-                                                                                                   df_orderlines,
-                                                                                                   list_wid,
-                                                                                                   list_dst,
-                                                                                                   list_route,
-                                                                                                   list_ord,
-                                                                                                   list_onum,
-                                                                                                   list_status)
-# print(list_route)
-# print(list_ord)
-# print(list_onum)
-# print(list_status)
-# print(distance_route)
-# print(list_wid)
-# print(list_dst)
-df_results = pd.DataFrame({'Distance_Route': list_dst, 'Chemins': list_route})
+df_results = pd.DataFrame({'WaveID': wave_route, 'Distance_Route': list_dst, 'Chemins': list_route, 'Orders_Number': order_ids_route})
 # df_last_orders_number = df_results[df_results['Orders_Number'] == orders_numbersf]
-df_results.to_csv('output_2.csv', index=False)
+df_results.to_csv('output/output_2.csv', index=False)
