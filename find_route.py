@@ -15,6 +15,7 @@ def orderlines_mapping(df_orderlines, orders_number):
     df_orderlines['OrderID'] = df_orderlines['OrderNumber'].map(dict_map)
     # Tạo cột WaveID theo công thức đã nêu ở trên
     df_orderlines['WaveID'] = ((df_orderlines['Order'] + (orders_number - 1)) // orders_number)
+    # print("order:",df_orderlines['Order'])
     waves_number = df_orderlines.WaveID.max() + 1
     return df_orderlines, waves_number
 
@@ -23,7 +24,7 @@ def get_product_layout(df_orderlines, df_layout, orders_number):
     df_orderlines, waves_number = orderlines_mapping(df_orderlines, orders_number)
     df_orderlines = df_orderlines.sort_values(by='OrderNumber')
     df_grouped = df_orderlines.groupby(['WaveID', 'ProductID'])['QuantityOrder'].sum().reset_index()
-    # print(df_orderlines)
+    # print(df_grouped)
     df_layout['SubProductID'] = df_layout.groupby('ProductID').cumcount() + 1
     df_layout['SubProductID'] = df_layout['ProductID'] + '_' + df_layout['SubProductID'].astype(str)
 
@@ -72,16 +73,19 @@ def locations_listing(df_final, wave_id):
     # Lọc ra từ Dataframe theo với mã wave muốn list
     df = df_final[df_final['WaveID'] == wave_id]
     # Tạo list tọa độ bằng xử lý chuỗi
-    list_locs = list(df['Coord'].apply(lambda t: literal_eval(t)).values)
-    # list_locs = df['Coord'].tolist()
-    # print(list_locs)
-    list_locs = list(k for k, _ in itertools.groupby(list_locs))
+    list_locs = df['Coord'].tolist()
+    # Tạo list location tương ứng
+    list_locations = df['Location'].tolist()
+    list_products = df['ProductID'].tolist()
+    list_quantity_taken = df['QuantityTaken'].tolist()
 
+    list_objects = [dict(Location=loc, ProductID=prod, QuantityTaken=qty) for loc, prod, qty in
+                    zip(list_locations, list_products, list_quantity_taken)]
+    # Loại bỏ các phần tử trùng lặp
     # Tính độ dài của list
     n_locs = len(list_locs)
-    # print(list_locs)
-    return list_locs, n_locs
-
+    # print("list_objects:", list_objects)
+    return list_locs, n_locs, list_objects
 
 # Tính khoảng cách giữa 2 điểm lấy hàng trong kho
 def distance_picking(Loc1, Loc2, y_low, y_high):
@@ -164,7 +168,7 @@ def create_picking_route(origin_loc, list_locs, y_low, y_high):
     return wave_distance, list_chemin
 
 
-def simulation_wave(y_low, y_high, orders_number, df_orderlines, wave_route, list_dst, list_route, df_layout):
+def simulation_wave(y_low, y_high, orders_number, df_orderlines, wave_route, list_dst, list_route, df_layout, list_info_order):
     # Địa điểm ban đầu ( khu vực xuất hàng, cửa hàng)
     Loc_orn = [0, y_low]
     # Tạo biến để lưu tổng khoảng cách
@@ -178,37 +182,42 @@ def simulation_wave(y_low, y_high, orders_number, df_orderlines, wave_route, lis
 
     for wave_id in range(1, waves_number):
         # List ra các location cho mỗi wave
-        list_locs, n_locs = locations_listing(df_final, wave_id)
+        list_locs, n_locs, list_objects = locations_listing(df_final, wave_id)
         # Sử dụng hàm create_picking_route để tạo
         wave_distance, list_chemin = create_picking_route(Loc_orn, list_locs, y_low, y_high)
         distance_route = distance_route + wave_distance
         list_dst.append(wave_distance)
         list_route.append(list_chemin)
         wave_route.append(wave_id)
+        list_info_order.append(list_objects)
+        # print("list_locations:", wave_id, list_locations)
+        # print("list_product:", wave_id, list_product)
+        # print("list_quantity_taken:", wave_id, list_quantity_taken)
         # print(wave_id)
 
         # Loại bỏ các OrderID trùng lặp
         unique_order_ids = list(set(wave_order_ids_dict[wave_id]))
         unique_order_ids.sort()
         wave_order_ids_dict[wave_id] = unique_order_ids
-        print(f"For wave_id {wave_id}, the unique OrderIDs are: {unique_order_ids}")
+        # print(f"For wave_id {wave_id}, the unique OrderIDs are: {unique_order_ids}")
         order_ids_route.append(unique_order_ids)
-
-    return wave_route, list_dst, list_route, distance_route, order_ids_route
+        # print("list_objects:", list_objects)
+    # print("list_objects:", list_objects)
+    return wave_route, list_dst, list_route, distance_route, order_ids_route, list_info_order
 
 
 df_orderlines = pd.read_json('database/df_order.json')
-orders_numbers = 1
+orders_numbers = 3
 df_layout = pd.read_json('database/df_layout.json')
 y_low, y_high = 0, 25
-wave_route, list_dst, list_route = [], [], []
-wave_route, list_dst, list_route, distance_route, order_ids_route = simulation_wave(y_low, y_high,
+wave_route, list_dst, list_route, list_location, list_info_order = [], [], [], [], []
+wave_route, list_dst, list_route, distance_route, order_ids_route, list_info_order = simulation_wave(y_low, y_high,
                                                                    orders_numbers,
                                                                    df_orderlines,
                                                                    wave_route,
                                                                    list_dst,
-                                                                   list_route, df_layout)
+                                                                   list_route, df_layout, list_info_order)
 
-df_results = pd.DataFrame({'WaveID': wave_route, 'Distance_Route': list_dst, 'Chemins': list_route, 'Orders_Number': order_ids_route})
+df_results = pd.DataFrame({'WaveID': wave_route, 'Distance_Route': list_dst, 'Chemins': list_route, 'Orders_Number': order_ids_route, 'List_Objects': list_info_order})
 # df_last_orders_number = df_results[df_results['Orders_Number'] == orders_numbersf]
 df_results.to_csv('output/output_2.csv', index=False)

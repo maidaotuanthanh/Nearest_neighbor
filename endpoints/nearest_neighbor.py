@@ -202,18 +202,20 @@ def simulation_wave(y_low, y_high, orders_number, df_orderlines, wave_route, lis
 
 
 
-# df_orderlines = pd.read_json('database/df_order.json')
+# df_orderlines = pd.read_csv('database/df_order.csv')
 # orders_numbers = 3
-# df_layout = pd.read_json('database/df_layout.json')
+# df_layout = pd.read_csv('database/df_layout.csv')
 # y_low, y_high = 0, 25
 # wave_route, list_dst, list_route = [], [], []
 # wave_route, list_dst, list_route, distance_route, order_ids_route = simulation_wave(y_low, y_high,
-#                                                                    orders_numbers,
-#                                                                    df_orderlines,
-#                                                                    wave_route,
-#                                                                    list_dst,
-#                                                                    list_route)
+#                                                                                     orders_numbers,
+#                                                                                     df_orderlines,
+#                                                                                     wave_route,
+#                                                                                     list_dst,
+#                                                                                     list_route,
+#                                                                                     df_layout)
 #
-# df_results = pd.DataFrame({'WaveID': wave_route, 'Distance_Route': list_dst, 'Chemins': list_route, 'Orders_Number': order_ids_route})
+# df_results = pd.DataFrame(
+#     {'WaveID': wave_route, 'Distance_Route': list_dst, 'Chemins': list_route, 'Orders_Number': order_ids_route})
 # # df_last_orders_number = df_results[df_results['Orders_Number'] == orders_numbersf]
-# df_results.to_json('output/output_2.json', orient='records')
+# df_results.to_csv('output/output_2.json', index=False)
